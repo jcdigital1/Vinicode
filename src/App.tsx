@@ -13,9 +13,11 @@ import {
   RefreshCw,
   AlertCircle,
   ShieldCheck,
+  Loader2,
 } from 'lucide-react';
 import { QRCodeItem, User, DashboardStats as StatsType } from './types.ts';
-import { api, getStoredToken, removeStoredToken } from './services/api.ts';
+import { api } from './services/api.ts';
+import { authService } from './services/authService.ts';
 import { Navbar, NavTab } from './components/Navbar.tsx';
 import { DashboardStats } from './components/DashboardStats.tsx';
 import { QRCodeCard } from './components/QRCodeCard.tsx';
@@ -27,9 +29,102 @@ import { GoogleReviewSection } from './components/GoogleReviewSection.tsx';
 import { NfcModal } from './components/NfcModal.tsx';
 import { AccountModal } from './components/AccountModal.tsx';
 import { AuthView } from './components/AuthView.tsx';
+import { Logo } from './components/Logo.tsx';
 
 export default function App() {
-  // Auth state
+  // --------------------------------------------------------------------------
+  // 1. PUBLIC SCAN ROUTE: /q/[code] MUST NEVER REQUIRE LOGIN OR SHOW DASHBOARD
+  // --------------------------------------------------------------------------
+  const [publicScanCode] = useState<string | null>(() => {
+    try {
+      const path = window.location.pathname || '';
+      if (path.startsWith('/q/')) {
+        const candidate = path.split('/q/')[1]?.split('/')[0]?.split('?')[0];
+        return candidate && candidate.trim().length > 0 ? candidate.trim().toUpperCase() : null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+
+  const [publicScanLoading, setPublicScanLoading] = useState(Boolean(publicScanCode));
+  const [publicScanError, setPublicScanError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!publicScanCode) return;
+
+    let isMounted = true;
+    setPublicScanLoading(true);
+
+    api
+      .getPublicQRDestination(publicScanCode)
+      .then((res) => {
+        if (!isMounted) return;
+        if (!res) {
+          setPublicScanError('QR Code não encontrado ou link inexistente.');
+          setPublicScanLoading(false);
+          return;
+        }
+
+        if (!res.active) {
+          setPublicScanError('Este QR Code está temporariamente desativado pelo proprietário.');
+          setPublicScanLoading(false);
+          return;
+        }
+
+        // Instant direct redirection
+        window.location.replace(res.destinationUrl);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setPublicScanError('Não foi possível conectar ao servidor para carregar o destino.');
+          setPublicScanLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [publicScanCode]);
+
+  // If this is a public scan path (/q/:code), render public redirect interface
+  if (publicScanCode) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
+        <div className="mb-6">
+          <Logo size="md" showSlogan={false} />
+        </div>
+        <div className="w-full max-w-sm bg-[#141417] border border-zinc-800 rounded-2xl p-8 shadow-2xl">
+          {publicScanLoading ? (
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
+              <div className="text-sm text-zinc-300 font-medium">Redirecionando para o destino...</div>
+              <div className="text-xs text-zinc-400">Código: {publicScanCode}</div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-red-950/60 border border-red-800/80 flex items-center justify-center text-red-400">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h2 className="text-base font-bold text-white">Aviso do QR Code</h2>
+              <p className="text-xs text-zinc-400 leading-relaxed">{publicScanError}</p>
+              <button
+                onClick={() => (window.location.href = '/')}
+                className="mt-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 rounded-lg transition-colors"
+              >
+                Ir para o início
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // 2. AUTHENTICATION & PRIVATE APPLICATION
+  // --------------------------------------------------------------------------
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
 
@@ -57,26 +152,30 @@ export default function App() {
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isNfcOpen, setIsNfcOpen] = useState(false);
 
-  // Check initial user authentication
+  // Check initial user authentication via authService
   useEffect(() => {
-    const token = getStoredToken();
-    if (!token) {
-      setAuthChecking(false);
-      return;
-    }
+    let isMounted = true;
 
-    api
-      .getMe()
-      .then((res) => {
-        setUser(res.user);
+    authService
+      .getCurrentUser()
+      .then((u) => {
+        if (isMounted) setUser(u);
       })
       .catch(() => {
-        removeStoredToken();
-        setUser(null);
+        if (isMounted) setUser(null);
       })
       .finally(() => {
-        setAuthChecking(false);
+        if (isMounted) setAuthChecking(false);
       });
+
+    const unsubscribe = authService.onAuthStateChange((u) => {
+      if (isMounted) setUser(u);
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   // Fetch QR codes when user is authenticated
@@ -102,8 +201,8 @@ export default function App() {
   }, [user]);
 
   // Logout handler
-  const handleLogout = () => {
-    removeStoredToken();
+  const handleLogout = async () => {
+    await authService.signOut();
     setUser(null);
     setQrCodes([]);
     setIsAccountOpen(false);
@@ -121,11 +220,9 @@ export default function App() {
   // Filtered QR codes list (Search in real-time by name, code, or destination)
   const filteredQRCodes = useMemo(() => {
     return qrCodes.filter((item) => {
-      // Status filter
       if (statusFilter === 'ACTIVE' && !item.active) return false;
       if (statusFilter === 'INACTIVE' && item.active) return false;
 
-      // Search query filter (name, code, or destinationUrl)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchesName = item.name.toLowerCase().includes(q);
@@ -166,7 +263,7 @@ export default function App() {
     }
   };
 
-  // Deactivate from delete modal
+  // Deactivate from modal
   const handleDeactivateFromModal = async (item: QRCodeItem) => {
     try {
       const res = await api.updateQRCode(item.id, { active: false });
@@ -177,213 +274,149 @@ export default function App() {
     }
   };
 
-  // Auth checking spinner
+  // If checking authentication, show brand loading screen
   if (authChecking) {
     return (
-      <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-zinc-400">
-          <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-medium">Carregando VINI CODE...</span>
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-4">
+        <Logo size="lg" showSlogan={true} />
+        <div className="mt-8 flex items-center gap-3 text-xs text-zinc-400">
+          <div className="w-3.5 h-3.5 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+          <span>Verificando autenticação...</span>
         </div>
       </div>
     );
   }
 
-  // Not logged in -> Show real auth view
+  // If user is not authenticated, show Auth View
   if (!user) {
-    return <AuthView onAuthSuccess={(newUser) => setUser(newUser)} />;
+    return <AuthView onAuthSuccess={(authenticatedUser) => setUser(authenticatedUser)} />;
   }
 
   return (
-    <div id="vini-code-app-container" className="min-h-screen bg-[#09090b] text-neutral-100 flex flex-col antialiased">
-      {/* Top Navbar */}
+    <div id="vini-code-app" className="min-h-screen bg-[#09090b] text-neutral-100 flex flex-col">
+      {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
-        onOpenCreateQR={() => {
-          setInitialCreateName('');
-          setInitialCreateUrl('');
-          setIsCreateOpen(true);
-        }}
-        onOpenAccount={() => setIsAccountOpen(true)}
-        onOpenNfcInfo={() => setIsNfcOpen(true)}
+        onTabChange={setCurrentTab}
         user={user}
+        onOpenAccount={() => setIsAccountOpen(true)}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        {/* VIEW 1 & 2: DASHBOARD OU MEUS QR CODES */}
-        {(currentTab === 'dashboard' || currentTab === 'qrcodes') && (
-          <div className="space-y-6">
-            {/* Header: VINI CODE - Gerencie seus QR Codes dinâmicos */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Main Body */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {/* VIEW 1: DASHBOARD GERAL */}
+        {currentTab === 'dashboard' && (
+          <div className="space-y-8 animate-fadeIn">
+            {/* Header with Quick Action */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                    VINI CODE
-                  </h1>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-red-400 bg-red-950/40 border border-red-900/40 px-2 py-0.5 rounded">
-                    Dinâmico
-                  </span>
-                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                  Painel de Controle
+                </h1>
                 <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                  Gerencie seus QR Codes dinâmicos. Links que evoluem com seu negócio.
+                  Gerencie seus QR Codes dinâmicos, destinos e métricas de escaneamento em tempo real.
                 </p>
               </div>
 
-              {/* Dois botões principais requisitados na Seção 4 */}
-              <div className="flex items-center gap-2.5 shrink-0">
+              <div className="flex items-center gap-2.5">
                 <button
-                  id="btn-main-new-qr"
+                  id="dashboard-new-qr-btn"
                   onClick={() => {
                     setInitialCreateName('');
                     setInitialCreateUrl('');
                     setIsCreateOpen(true);
                   }}
-                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-950/60 flex items-center gap-2 transition-all cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-red-950/50 flex items-center gap-2 transition-all cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>+ NOVO QR CODE</span>
-                </button>
-
-                <button
-                  id="btn-main-google-review"
-                  onClick={() => setCurrentTab('google_review')}
-                  className="px-4 py-2.5 rounded-xl bg-zinc-800/90 hover:bg-zinc-700 border border-amber-500/30 text-amber-300 hover:text-amber-200 font-bold text-xs sm:text-sm shadow-md flex items-center gap-2 transition-all cursor-pointer"
-                >
-                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                  <span>⭐ AVALIAÇÃO GOOGLE</span>
+                  <span>Novo QR Code</span>
                 </button>
               </div>
             </div>
 
-            {/* Painel compacto de estatísticas: QR CODES | ATIVOS | INATIVOS | LEITURAS */}
+            {/* Metrics cards */}
             <DashboardStats stats={stats} />
 
-            {/* Controls Bar: Pesquisa em tempo real + Filtros */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-              {/* 🔎 Buscar por nome ou código... */}
-              <div className="relative flex-1 max-w-md">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-400">
-                  <Search className="w-4 h-4" />
+            {/* Quick Banner: Google Reviews */}
+            <div className="bg-gradient-to-r from-red-950/40 via-[#141417] to-[#141417] border border-red-900/40 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-red-600/20 border border-red-600/40 flex items-center justify-center text-red-400 shrink-0 mt-0.5">
+                  <Star className="w-5 h-5 fill-red-500/30" />
                 </div>
-                <input
-                  id="search-input-qrcodes"
-                  type="text"
-                  placeholder="🔎 Buscar por nome, código ou destino..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-[#141417] border border-zinc-800 focus:border-red-500 rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-white placeholder-zinc-400 outline-none transition-all"
-                />
-                {searchQuery && (
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Gerador de Avaliação Google Direto
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 font-semibold uppercase">
+                      5 Estrelas
+                    </span>
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-xl">
+                    Crie links que abrem a tela de avaliação do Google com 5 estrelas pré-selecionadas.
+                    Ideal para placas físicas de balcão e mesas.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                id="banner-google-review-btn"
+                onClick={() => setCurrentTab('google_review')}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer shrink-0"
+              >
+                <span>Acessar Gerador</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Recent QR Codes Preview */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-red-500" />
+                  <h2 className="text-base font-bold text-white">QR Codes Recentes</h2>
+                </div>
+                {qrCodes.length > 0 && (
                   <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                    onClick={() => setCurrentTab('qrcodes')}
+                    className="text-xs text-red-400 hover:text-red-300 font-semibold cursor-pointer"
                   >
-                    Limpar
+                    Ver todos ({qrCodes.length}) →
                   </button>
                 )}
               </div>
 
-              {/* Filtros: TODOS | ATIVOS | INATIVOS */}
-              <div className="flex items-center gap-1 bg-[#141417] p-1 border border-zinc-800 rounded-xl shrink-0">
-                <button
-                  id="filter-all"
-                  onClick={() => setStatusFilter('ALL')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                    statusFilter === 'ALL'
-                      ? 'bg-zinc-700 text-white shadow-sm'
-                      : 'text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  TODOS ({stats.total})
-                </button>
-
-                <button
-                  id="filter-active"
-                  onClick={() => setStatusFilter('ACTIVE')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                    statusFilter === 'ACTIVE'
-                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60 shadow-sm'
-                      : 'text-zinc-400 hover:text-emerald-400'
-                  }`}
-                >
-                  ATIVOS ({stats.active})
-                </button>
-
-                <button
-                  id="filter-inactive"
-                  onClick={() => setStatusFilter('INACTIVE')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                    statusFilter === 'INACTIVE'
-                      ? 'bg-zinc-800 text-zinc-200 border border-zinc-700 shadow-sm'
-                      : 'text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  INATIVOS ({stats.inactive})
-                </button>
-              </div>
-            </div>
-
-            {/* Error notice if any */}
-            {errorMsg && (
-              <div className="p-3.5 bg-red-950/60 border border-red-800/70 rounded-xl text-red-300 text-xs flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{errorMsg}</span>
-                </div>
-                <button
-                  onClick={loadQRCodes}
-                  className="px-2.5 py-1 bg-red-900/60 hover:bg-red-800/70 rounded-lg text-xs font-medium cursor-pointer"
-                >
-                  Tentar novamente
-                </button>
-              </div>
-            )}
-
-            {/* QR Codes Compact Cards Grid */}
-            <div id="qrcodes-list-section">
               {loadingQRs ? (
-                <div className="py-16 text-center text-xs text-zinc-400 flex flex-col items-center gap-3">
+                <div className="text-center py-12 bg-[#141417] border border-zinc-800/80 rounded-2xl flex flex-col items-center justify-center gap-3">
                   <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-                  <span>Sincronizando com o banco de dados...</span>
+                  <span className="text-xs text-zinc-400">Carregando seus QR Codes...</span>
                 </div>
-              ) : filteredQRCodes.length === 0 ? (
-                <div className="py-16 px-4 bg-[#141417]/50 border border-dashed border-zinc-800 rounded-2xl text-center">
-                  <div className="w-12 h-12 rounded-xl bg-zinc-800/60 flex items-center justify-center text-zinc-400 mx-auto mb-3">
-                    <QrCode className="w-6 h-6 text-red-500" />
+              ) : qrCodes.length === 0 ? (
+                <div className="text-center py-12 bg-[#141417] border border-zinc-800/80 rounded-2xl flex flex-col items-center justify-center p-6">
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 mb-3">
+                    <QrCode className="w-6 h-6" />
                   </div>
-                  <h3 className="text-base font-bold text-white mb-1">
-                    {searchQuery
-                      ? 'Nenhum QR Code encontrado para esta busca'
-                      : 'Você ainda não possui QR Codes cadastrados'}
-                  </h3>
-                  <p className="text-xs text-zinc-400 max-w-sm mx-auto mb-4">
-                    {searchQuery
-                      ? 'Tente buscar por outro termo ou limpe o filtro.'
-                      : 'Crie seu primeiro QR Code dinâmico com link permanente que pode ser editado a qualquer hora.'}
+                  <h3 className="text-sm font-bold text-white">Nenhum QR Code criado ainda</h3>
+                  <p className="text-xs text-zinc-400 max-w-sm mt-1 mb-4">
+                    Crie seu primeiro QR Code dinâmico. O código é permanente e o link de destino pode
+                    ser alterado a qualquer momento.
                   </p>
                   <button
-                    onClick={() => {
-                      setInitialCreateName('');
-                      setInitialCreateUrl('');
-                      setIsCreateOpen(true);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-md cursor-pointer"
+                    onClick={() => setIsCreateOpen(true)}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    + CRIAR PRIMEIRO QR CODE
+                    <Plus className="w-4 h-4" />
+                    <span>Criar Primeiro QR Code</span>
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {filteredQRCodes.map((qr) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {qrCodes.slice(0, 4).map((item) => (
                     <QRCodeCard
-                      key={qr.id}
-                      item={qr}
-                      onEdit={(item) => setEditingItem(item)}
-                      onDownload={(item) => setDownloadingItem(item)}
-                      onDelete={(item) => setDeletingItem(item)}
-                      onToggleStatus={handleToggleStatus}
+                      key={item.id}
+                      item={item}
+                      onEdit={() => setEditingItem(item)}
+                      onDownload={() => setDownloadingItem(item)}
+                      onToggleStatus={() => handleToggleStatus(item)}
+                      onDelete={() => setDeletingItem(item)}
                     />
                   ))}
                 </div>
@@ -392,11 +425,128 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 3: ⭐ GERADOR DE AVALIAÇÃO GOOGLE */}
+        {/* VIEW 2: GERENCIAMENTO COMPLETO DE QR CODES */}
+        {currentTab === 'qrcodes' && (
+          <div className="space-y-6 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                  Meus QR Codes Dinâmicos
+                </h1>
+                <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                  Todos os códigos possuem slug permanente. Você pode alterar o destino sem trocar o QR impresso.
+                </p>
+              </div>
+
+              <button
+                id="qrcodes-page-create-btn"
+                onClick={() => {
+                  setInitialCreateName('');
+                  setInitialCreateUrl('');
+                  setIsCreateOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-red-950/50 flex items-center gap-2 transition-all cursor-pointer self-start sm:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Criar Novo QR Code</span>
+              </button>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="bg-[#141417] border border-zinc-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+              {/* Search input */}
+              <div className="relative w-full sm:w-80">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-400">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  id="qr-search-input"
+                  type="text"
+                  placeholder="Buscar por nome, código ou destino..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-[#0c0c0e] border border-zinc-800 focus:border-red-500 rounded-xl pl-10 pr-3.5 py-2 text-xs text-white placeholder-zinc-400 outline-none transition-all"
+                />
+              </div>
+
+              {/* Status Filter Tabs */}
+              <div className="flex items-center gap-1 bg-[#0c0c0e] p-1 border border-zinc-800 rounded-xl w-full sm:w-auto justify-center">
+                <button
+                  id="filter-all-btn"
+                  onClick={() => setStatusFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    statusFilter === 'ALL'
+                      ? 'bg-zinc-800 text-white'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Todos ({qrCodes.length})
+                </button>
+                <button
+                  id="filter-active-btn"
+                  onClick={() => setStatusFilter('ACTIVE')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    statusFilter === 'ACTIVE'
+                      ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/50'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Ativos ({stats.active})
+                </button>
+                <button
+                  id="filter-inactive-btn"
+                  onClick={() => setStatusFilter('INACTIVE')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    statusFilter === 'INACTIVE'
+                      ? 'bg-zinc-800 text-zinc-300'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Inativos ({stats.inactive})
+                </button>
+              </div>
+            </div>
+
+            {/* Grid of QR Codes */}
+            {loadingQRs ? (
+              <div className="text-center py-16 bg-[#141417] border border-zinc-800/80 rounded-2xl flex flex-col items-center justify-center gap-3">
+                <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-xs text-zinc-400">Carregando lista de QR Codes...</span>
+              </div>
+            ) : filteredQRCodes.length === 0 ? (
+              <div className="text-center py-16 bg-[#141417] border border-zinc-800/80 rounded-2xl flex flex-col items-center justify-center p-6">
+                <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 mb-3">
+                  <Filter className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Nenhum QR Code encontrado</h3>
+                <p className="text-xs text-zinc-400 max-w-sm mt-1">
+                  {searchQuery
+                    ? `Nenhum resultado corresponde à busca "${searchQuery}".`
+                    : 'Você não possui QR Codes com este filtro.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredQRCodes.map((item) => (
+                  <QRCodeCard
+                    key={item.id}
+                    item={item}
+                    onEdit={() => setEditingItem(item)}
+                    onDownload={() => setDownloadingItem(item)}
+                    onToggleStatus={() => handleToggleStatus(item)}
+                    onDelete={() => setDeletingItem(item)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* VIEW 3: GERADOR DE AVALIAÇÃO GOOGLE */}
         {currentTab === 'google_review' && (
           <GoogleReviewSection
-            onOpenCreateQRWithData={handleOpenCreateWithData}
-            onNavigateToQRs={() => setCurrentTab('qrcodes')}
+            onOpenCreateQR={handleOpenCreateWithData}
+            onOpenNfcModal={() => setIsNfcOpen(true)}
           />
         )}
       </main>
@@ -412,7 +562,7 @@ export default function App() {
           <div className="flex items-center gap-3 text-[11px]">
             <span className="flex items-center gap-1 text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5" />
-              Banco em Nuvem Ativo
+              Sincronização em Nuvem Ativa
             </span>
             <button
               onClick={() => setIsNfcOpen(true)}
@@ -425,7 +575,6 @@ export default function App() {
       </footer>
 
       {/* Modals */}
-      {/* 1. Modal: Criar QR Code */}
       <CreateQRModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
@@ -433,11 +582,10 @@ export default function App() {
         initialUrl={initialCreateUrl}
         onSuccess={(newItem) => {
           setQrCodes((prev) => [newItem, ...prev]);
-          setDownloadingItem(newItem); // Auto prompt download as requested
+          setDownloadingItem(newItem);
         }}
       />
 
-      {/* 2. Modal: Editar Destino do QR Code */}
       <EditQRModal
         isOpen={editingItem !== null}
         item={editingItem}
@@ -448,14 +596,12 @@ export default function App() {
         }}
       />
 
-      {/* 3. Modal: Baixar QR Code (PNG / SVG com opção de nome abaixo) */}
       <DownloadQRModal
         isOpen={downloadingItem !== null}
         item={downloadingItem}
         onClose={() => setDownloadingItem(null)}
       />
 
-      {/* 4. Modal: Exclusão Segura */}
       <DeleteConfirmModal
         isOpen={deletingItem !== null}
         item={deletingItem}
@@ -464,7 +610,6 @@ export default function App() {
         onDeletePermanently={handleDeletePermanent}
       />
 
-      {/* 5. Modal: Minha Conta */}
       <AccountModal
         isOpen={isAccountOpen}
         user={user}
@@ -472,11 +617,7 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* 6. Modal: Informações de Placa & NFC */}
-      <NfcModal
-        isOpen={isNfcOpen}
-        onClose={() => setIsNfcOpen(false)}
-      />
+      <NfcModal isOpen={isNfcOpen} onClose={() => setIsNfcOpen(false)} />
     </div>
   );
 }

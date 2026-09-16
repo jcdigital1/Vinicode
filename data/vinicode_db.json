@@ -6,6 +6,20 @@
       "email": "contato@vinicode.com",
       "passwordHash": "$2b$10$lgcEbVK/vfZlpq2Pxs/JT.N3IOW3lKoq4KkmrcsxHqbvL09UE7LoW",
       "createdAt": "2026-09-16T11:59:57.892Z"
+    },
+    {
+      "id": "usr_ae3b4b03124a",
+      "name": "Jeann",
+      "email": "jeanncarllostk00@gmail.com",
+      "passwordHash": "$2b$10$6upnnwESOOWBkbiBzV6ZTuvZglyAT.JPwowU5v5bp0FL5hA51SzGe",
+      "createdAt": "2026-09-16T12:19:32.257Z"
+    },
+    {
+      "id": "usr_cc1e39fea178",
+      "name": "Vini Silva",
+      "email": "vini@teste.com",
+      "passwordHash": "$2b$10$y8xVqgtzvqsovtUxda0fdOG1uuvIAosPUh1C/Zx0TYwTuCAmEnm92",
+      "createdAt": "2026-09-16T12:35:26.805Z"
     }
   ],
   "qr_codes": [
@@ -34,6 +48,19 @@
       "updatedAt": "2026-09-15T11:59:57.892Z",
       "scanCount": 89,
       "lastScannedAt": "2026-09-16T06:59:57.892Z"
+    },
+    {
+      "id": "qr_407db7afdcea",
+      "userId": "usr_cc1e39fea178",
+      "code": "MBYZAW",
+      "name": "Cardápio Restaurante",
+      "destinationUrl": "https://cardapio.exemplo.com",
+      "active": true,
+      "type": "custom",
+      "createdAt": "2026-09-16T12:35:46.595Z",
+      "updatedAt": "2026-09-16T12:35:46.595Z",
+      "scanCount": 1,
+      "lastScannedAt": "2026-09-16T12:35:49.995Z"
     }
   ],
   "qr_scans": [
@@ -48,6 +75,13 @@
       "id": "scn_aee06d8140f3",
       "qrCodeId": "qr_demo_1",
       "scannedAt": "2026-09-16T12:00:11.144Z",
+      "userAgent": "curl/7.88.1",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "scn_530a3f853203",
+      "qrCodeId": "qr_407db7afdcea",
+      "scannedAt": "2026-09-16T12:35:49.995Z",
       "userAgent": "curl/7.88.1",
       "ip": "127.0.0.1"
     }

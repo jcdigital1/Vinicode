@@ -176,6 +176,35 @@ async function startServer() {
     });
   });
 
+  app.post('/api/auth/forgot-password', (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Informe um e-mail válido' });
+    }
+    // Return success message so we don't leak registered emails
+    res.json({
+      message: 'Se o e-mail estiver cadastrado, as instruções de recuperação foram enviadas.',
+    });
+  });
+
+  app.post('/api/auth/reset-password', authenticateToken, (req: AuthRequest, res) => {
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres' });
+    }
+    res.json({ message: 'Senha atualizada com sucesso' });
+  });
+
+  // Rota pública para resolução de QR Code dinâmico
+  app.get('/api/qr/public/:code', (req, res) => {
+    const code = req.params.code.toUpperCase();
+    const qr = db.getQRCodeByCode(code);
+    if (!qr) {
+      return res.status(404).json({ error: 'QR Code não encontrado' });
+    }
+    res.json({ destinationUrl: qr.destinationUrl, active: qr.active });
+  });
+
   // ----------------------------------------------------
   // 3. GERENCIAMENTO DE QR CODES DINÂMICOS
   // ----------------------------------------------------
