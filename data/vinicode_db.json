@@ -1,0 +1,68 @@
+{
+  "users": [
+    {
+      "id": "usr_demo_vini",
+      "name": "Vini Demonstração",
+      "email": "contato@vinicode.com",
+      "passwordHash": "$2b$10$lgcEbVK/vfZlpq2Pxs/JT.N3IOW3lKoq4KkmrcsxHqbvL09UE7LoW",
+      "createdAt": "2026-09-16T11:59:57.892Z"
+    }
+  ],
+  "qr_codes": [
+    {
+      "id": "qr_demo_1",
+      "userId": "usr_demo_vini",
+      "code": "VINI777",
+      "name": "Instagram Oficial",
+      "destinationUrl": "https://youtube.com",
+      "active": true,
+      "type": "custom",
+      "createdAt": "2026-09-14T11:59:57.892Z",
+      "updatedAt": "2026-09-16T12:00:09.331Z",
+      "scanCount": 144,
+      "lastScannedAt": "2026-09-16T12:00:11.144Z"
+    },
+    {
+      "id": "qr_demo_2",
+      "userId": "usr_demo_vini",
+      "code": "GOOG99",
+      "name": "Avaliação Google — Restaurante Don Vini",
+      "destinationUrl": "https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4",
+      "active": true,
+      "type": "google_review",
+      "createdAt": "2026-09-15T11:59:57.892Z",
+      "updatedAt": "2026-09-15T11:59:57.892Z",
+      "scanCount": 89,
+      "lastScannedAt": "2026-09-16T06:59:57.892Z"
+    }
+  ],
+  "qr_scans": [
+    {
+      "id": "scn_81c7c4561037",
+      "qrCodeId": "qr_demo_1",
+      "scannedAt": "2026-09-16T11:59:57.893Z",
+      "userAgent": "curl/7.88.1",
+      "ip": "127.0.0.1"
+    },
+    {
+      "id": "scn_aee06d8140f3",
+      "qrCodeId": "qr_demo_1",
+      "scannedAt": "2026-09-16T12:00:11.144Z",
+      "userAgent": "curl/7.88.1",
+      "ip": "127.0.0.1"
+    }
+  ],
+  "google_businesses": [
+    {
+      "id": "gb_demo_1",
+      "userId": "usr_demo_vini",
+      "businessName": "Restaurante Don Vini",
+      "address": "Av. Paulista, 1000 - Bela Vista",
+      "city": "São Paulo - SP",
+      "placeId": "ChIJN1t_tDeuEmsRUsoyG83frY4",
+      "reviewUrl": "https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4",
+      "qrCodeId": "qr_demo_2",
+      "createdAt": "2026-09-15T11:59:57.892Z"
+    }
+  ]
+}

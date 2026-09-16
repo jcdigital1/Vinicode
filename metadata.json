@@ -1,0 +1,6 @@
+{
+  "name": "VINI CODE",
+  "description": "QR Codes inteligentes. Links que evoluem. Plataforma profissional de geração e gerenciamento de QR Codes dinâmicos e avaliação Google.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
