@@ -1,12 +1,25 @@
 @import "tailwindcss";
 
 @layer base {
+  html, body {
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   }
   
   h1, h2, h3, h4, h5, h6, .font-heading {
     font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+
+  /* Previne zoom involuntário ao tocar em campos de texto no iOS/Android */
+  @media (max-width: 768px) {
+    input, textarea, select {
+      font-size: 16px !important;
+    }
   }
 }
 
